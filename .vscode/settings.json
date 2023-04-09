@@ -5,6 +5,8 @@
         "defs.h": "c",
         "proc.h": "c",
         "memlayout.h": "c",
-        "cstdio": "c"
+        "cstdio": "c",
+        "cstdlib": "c",
+        "user.h": "c"
     },
 }

@@ -4,8 +4,7 @@
 
 int main(int argc, char *argv[])
 {
-    char *str = "hello world xv6\n";
-    write(1, str, strlen(str));
-
-    exit(0, "EXIT_SUCCESS");
+    // char *str = "goodbye fhvctyfcg\n";
+    // write(1, str, strlen(str));
+    exit(0, "Goodbye World xv6");
 }

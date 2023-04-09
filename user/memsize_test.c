@@ -36,5 +36,5 @@ void memsize_test(void)
 int main(void)
 {
     memsize_test();
-    exit(0);
+    exit(0, "EXIT_SUCCESS");
 }

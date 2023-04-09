@@ -11,7 +11,14 @@ sys_exit(void)
 {
   int n;
   argint(0, &n);
-  exit(n);
+
+  char exit_msg[32];
+  // exit_msg = (char*)malloc(32);
+
+  // printf("return value: %d\n", argstr(1, exit_msg, 32));
+  argstr(1, exit_msg, 32);
+
+  exit(n, exit_msg);
   return 0; // not reached
 }
 
@@ -32,7 +39,13 @@ sys_wait(void)
 {
   uint64 p;
   argaddr(0, &p);
-  return wait(p);
+
+  uint64 msg;
+  argaddr(1, &msg);
+
+  int something = wait(p, msg);
+  // write(1, msg, 32);
+  return something;
 }
 
 uint64
