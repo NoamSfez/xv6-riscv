@@ -324,8 +324,25 @@ int fork(void)
   np->parent = p;
   release(&wait_lock);
 
+  // creation algorithm
+  int count = 0;
+  long long minAccumulatorValue = 9223372036854775807; // max long long value
+  for (p = proc; p < &proc[NPROC] && p != np; p++)
+  {
+    acquire(&p->lock);
+    if (p->state == RUNNABLE || p->state == RUNNING)
+    {
+      count++;
+      if (p->accumulator < minAccumulatorValue)
+        minAccumulatorValue = p->accumulator;
+    }
+    release(&p->lock);
+  }
+
   acquire(&np->lock);
   np->state = RUNNABLE;
+  np->accumulator = count == 1 ? 0 : minAccumulatorValue;
+  set_ps_priority(5);
   release(&np->lock);
 
   return pid;
@@ -450,6 +467,63 @@ int wait(uint64 addr, uint64 msg)
   }
 }
 
+void algorithmPriorityScheduling(struct cpu *c)
+{
+  struct proc *p;
+
+  int maxPriority = 0;
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->ps_priority > maxPriority)
+      maxPriority = p->ps_priority;
+    release(&p->lock);
+  }
+
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->ps_priority == maxPriority && p->state == RUNNABLE)
+    {
+      // Switch to chosen process.  It is the process's job
+      // to release its lock and then reacquire it
+      // before jumping back to us.
+      p->state = RUNNING;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&p->lock);
+  }
+}
+
+void algorithmFCFS(struct cpu *c)
+{
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->state == RUNNABLE)
+    {
+      // Switch to chosen process.  It is the process's job
+      // to release its lock and then reacquire it
+      // before jumping back to us.
+      p->state = RUNNING;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&p->lock);
+  }
+}
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -459,7 +533,7 @@ int wait(uint64 addr, uint64 msg)
 //    via swtch back to the scheduler.
 void scheduler(void)
 {
-  struct proc *p;
+  // struct proc *p;
   struct cpu *c = mycpu();
 
   c->proc = 0;
@@ -468,24 +542,8 @@ void scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for (p = proc; p < &proc[NPROC]; p++)
-    {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
-      {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-      }
-      release(&p->lock);
-    }
+    algorithmFCFS(c);
+    algorithmPriorityScheduling(c);
   }
 }
 
@@ -589,6 +647,23 @@ void wakeup(void *chan)
       acquire(&p->lock);
       if (p->state == SLEEPING && p->chan == chan)
       {
+        // creation algorithm
+        struct proc *p1;
+        int count = 0;
+        long long minAccumulatorValue = 9223372036854775807; // max long long value
+        for (p1 = proc; p1 < &proc[NPROC] && p1 != p; p1++)
+        {
+          acquire(&p1->lock);
+          if (p1->state == RUNNABLE || p1->state == RUNNING)
+          {
+            count++;
+            if (p1->accumulator < minAccumulatorValue)
+              minAccumulatorValue = p1->accumulator;
+          }
+          release(&p1->lock);
+        }
+
+        p->accumulator = count == 1 ? 0 : minAccumulatorValue;
         p->state = RUNNABLE;
       }
       release(&p->lock);
@@ -700,4 +775,17 @@ void procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// we are assumming the curr proc lock is acquired
+void set_ps_priority(int priority)
+{
+  if (priority > 10 || priority < 1)
+  {
+    panic("set_ps_priority");
+  }
+  struct proc *proc;
+  if ((proc = myproc()) == 0)
+    panic("set_ps_priority");
+  proc->ps_priority = priority;
 }
