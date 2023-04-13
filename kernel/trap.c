@@ -151,9 +151,16 @@ void kerneltrap()
     panic("kerneltrap");
   }
 
+  struct proc *myProc = myproc();
+
   // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+  if (which_dev == 2 && myProc != 0 && myProc->state == RUNNING)
+  {
+    printf("pid running: %d\n", myProc->pid);
+    // panic("something");
+    myProc->accumulator += myProc->ps_priority;
     yield();
+  }
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.

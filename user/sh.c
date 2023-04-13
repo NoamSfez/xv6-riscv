@@ -199,6 +199,7 @@ int fork1(void)
   int pid;
 
   pid = fork();
+  printf("forked: %d\n", pid);
   if (pid == -1)
     panic("fork");
   return pid;
