@@ -136,6 +136,7 @@ UPROGS=\
 	$U/_memsize_test\
 	$U/_goodbye\
 	$U/_looper\
+	$U/_cfs\
 
 
 

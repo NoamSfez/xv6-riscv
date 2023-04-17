@@ -15,6 +15,8 @@ struct proc *initproc;
 int nextpid = 1;
 struct spinlock pid_lock;
 
+int sched_policy = 2;
+
 extern void forkret(void);
 static void freeproc(struct proc *p);
 
@@ -280,6 +282,33 @@ int growproc(int n)
   return 0;
 }
 
+void set_initial_priority()
+{
+  if (sched_policy == 1)
+  {
+    set_ps_priority(5);
+  }
+  else if (sched_policy == 2)
+  {
+    struct proc *parent = myproc()->parent;
+    if (parent)
+    {
+      set_cfs_priority(parent->cfs_priority);
+    }
+    else
+    {
+      set_cfs_priority(1);
+    }
+  }
+  else if (sched_policy == 0)
+  {
+  }
+  else
+  {
+    panic("set initial priority");
+  }
+}
+
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
 int fork(void)
@@ -326,23 +355,23 @@ int fork(void)
 
   // creation algorithm
   int count = 0;
-  long long minAccumulatorValue = 9223372036854775807; // max long long value
+  long long minAccumulatorValue = -1;
   for (p = proc; p < &proc[NPROC] && p != np; p++)
   {
     acquire(&p->lock);
     if (p->state == RUNNABLE || p->state == RUNNING)
     {
       count++;
-      if (p->accumulator < minAccumulatorValue)
+      if (p->accumulator < minAccumulatorValue || minAccumulatorValue == -1)
         minAccumulatorValue = p->accumulator;
     }
     release(&p->lock);
   }
 
   acquire(&np->lock);
-  np->state = RUNNABLE;
   np->accumulator = count == 1 ? 0 : minAccumulatorValue;
-  set_ps_priority(5);
+  set_initial_priority();
+  np->state = RUNNABLE;
   release(&np->lock);
 
   return pid;
@@ -467,39 +496,7 @@ int wait(uint64 addr, uint64 msg)
   }
 }
 
-void algorithmPriorityScheduling(struct cpu *c)
-{
-  struct proc *p;
-
-  int maxPriority = 0;
-  for (p = proc; p < &proc[NPROC]; p++)
-  {
-    acquire(&p->lock);
-    if (p->ps_priority > maxPriority)
-      maxPriority = p->ps_priority;
-    release(&p->lock);
-  }
-
-  for (p = proc; p < &proc[NPROC]; p++)
-  {
-    acquire(&p->lock);
-    if (p->ps_priority == maxPriority && p->state == RUNNABLE)
-    {
-      // Switch to chosen process.  It is the process's job
-      // to release its lock and then reacquire it
-      // before jumping back to us.
-      p->state = RUNNING;
-      c->proc = p;
-      swtch(&c->context, &p->context);
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
-    release(&p->lock);
-  }
-}
-
+// first come first serve algorithm
 void algorithmFCFS(struct cpu *c)
 {
   struct proc *p;
@@ -524,6 +521,94 @@ void algorithmFCFS(struct cpu *c)
   }
 }
 
+// priority scheduler algorithm (not implementing starvation freedom)
+void algorithmPriorityScheduling(struct cpu *c)
+{
+  struct proc *p;
+
+  int maxPriority = 0;
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->ps_priority > maxPriority && p->state == RUNNABLE)
+      maxPriority = p->ps_priority;
+    release(&p->lock);
+  }
+
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->ps_priority == maxPriority && p->state == RUNNABLE)
+    {
+      // Switch to chosen process.  It is the process's job
+      // to release its lock and then reacquire it
+      // before jumping back to us.
+      p->state = RUNNING;
+      c->proc = p;
+      swtch(&c->context, &p->context);
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&p->lock);
+  }
+}
+
+// completely fair scheduler algorithm
+void algorithmCFS(struct cpu *c)
+{
+  struct proc *p;
+
+  long vruntime = -1;
+  // struct proc *pToRun = allocproc();
+  // release(&pToRun->lock);
+  int pid = 0;
+
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->state == RUNNABLE)
+    {
+      int decayFactor = 75 + 25 * p->cfs_priority; // cfs_priority = 0: high - 1: normal - 2: low
+      int nonZeroTime = p->rtime + p->stime + p->retime == 0 ? 1 : (p->rtime + p->stime + p->retime);
+      long curr_vruntime = decayFactor * p->rtime / nonZeroTime;
+
+      if (curr_vruntime < vruntime || vruntime == -1)
+      {
+        vruntime = curr_vruntime;
+        pid = p->pid;
+      }
+    }
+    release(&p->lock);
+  }
+
+  // Switch to chosen process.  It is the process's job
+  // to release its lock and then reacquire it
+  // before jumping back to us.
+  if ((pid))
+  {
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->pid == pid && p->state == RUNNABLE)
+      {
+        // Switch to chosen process.  It is the process's job
+        // to release its lock and then reacquire it
+        // before jumping back to us.
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+      }
+      release(&p->lock);
+    }
+  }
+}
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -541,9 +626,18 @@ void scheduler(void)
   {
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
-
-    algorithmFCFS(c);
-    algorithmPriorityScheduling(c);
+    switch (sched_policy)
+    {
+    case 0:
+      algorithmFCFS(c);
+      break;
+    case 1:
+      algorithmPriorityScheduling(c);
+      break;
+    case 2:
+      algorithmCFS(c);
+      break;
+    }
   }
 }
 
@@ -645,19 +739,20 @@ void wakeup(void *chan)
     if (p != myproc())
     {
       acquire(&p->lock);
+
       if (p->state == SLEEPING && p->chan == chan)
       {
         // creation algorithm
         struct proc *p1;
         int count = 0;
-        long long minAccumulatorValue = 9223372036854775807; // max long long value
+        long long minAccumulatorValue = -1;
         for (p1 = proc; p1 < &proc[NPROC] && p1 != p; p1++)
         {
           acquire(&p1->lock);
           if (p1->state == RUNNABLE || p1->state == RUNNING)
           {
             count++;
-            if (p1->accumulator < minAccumulatorValue)
+            if (p1->accumulator < minAccumulatorValue || minAccumulatorValue == -1)
               minAccumulatorValue = p1->accumulator;
           }
           release(&p1->lock);
@@ -778,14 +873,107 @@ void procdump(void)
 }
 
 // we are assumming the curr proc lock is acquired
-void set_ps_priority(int priority)
+// returns 0 if success, else returns -1.
+// calls panic if myproc is none
+int set_ps_priority(int priority)
 {
   if (priority > 10 || priority < 1)
   {
-    panic("set_ps_priority");
+    // panic("set_ps_priority");
+    return -1;
   }
   struct proc *proc;
   if ((proc = myproc()) == 0)
     panic("set_ps_priority");
+  acquire(&proc->lock);
   proc->ps_priority = priority;
+  release(&proc->lock);
+  return 0;
+}
+
+// recieve a priority
+// 0 : high - 1 : normal - 2 : low
+// a new process is initialized with priority 1.
+int set_cfs_priority(int priority)
+{
+  if (priority < 0 || priority > 2)
+  {
+    // panic("set_ps_priority");
+    return -1;
+  }
+  struct proc *proc;
+  if ((proc = myproc()) == 0)
+    panic("set_cfs_priority");
+  acquire(&proc->lock);
+  proc->cfs_priority = priority;
+  release(&proc->lock);
+  return 0;
+}
+
+// recieve a priority
+// 0 : high - 1 : normal - 2 : low
+// a new process is initialized with priority 1.
+int get_cfs_stats(int pid, uint64 priority, uint64 rtime, uint64 stime, uint64 retime)
+{
+  int found = 0;
+  struct proc *wanted_proc;
+  for (wanted_proc = proc; wanted_proc < &proc[NPROC]; wanted_proc++)
+  {
+    acquire(&wanted_proc->lock);
+    if (wanted_proc->pid == pid)
+    {
+      found = 1;
+      release(&wanted_proc->lock);
+      break;
+    }
+    release(&wanted_proc->lock);
+  }
+
+  if (!found)
+    return -1;
+
+  acquire(&wanted_proc->lock);
+  copyout(wanted_proc->pagetable, priority, (char *)&wanted_proc->cfs_priority, sizeof(uint));
+  copyout(wanted_proc->pagetable, rtime, (char *)&wanted_proc->rtime, sizeof(uint64));
+  copyout(wanted_proc->pagetable, stime, (char *)&wanted_proc->stime, sizeof(uint64));
+  copyout(wanted_proc->pagetable, retime, (char *)&wanted_proc->retime, sizeof(uint64));
+  release(&wanted_proc->lock);
+
+  return 0;
+}
+
+int set_policy(int policy)
+{
+  if (policy < 0 || policy > 2)
+  {
+    return -1;
+  }
+  sched_policy = policy;
+  return 0;
+}
+
+void tiktok()
+{
+  struct proc *p;
+
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if (p->state == SLEEPING)
+    {
+      p->stime++;
+    }
+    else if (p->state == RUNNABLE)
+    {
+      p->retime++;
+    }
+    else if (p->state == RUNNING)
+    {
+      p->rtime++;
+    }
+    else
+    {
+    }
+    release(&p->lock);
+  }
 }

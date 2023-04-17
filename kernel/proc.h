@@ -121,4 +121,10 @@ struct proc
   // fields for task5
   long long accumulator;
   int ps_priority;
+
+  // fields for task6
+  int cfs_priority;
+  unsigned long rtime;
+  unsigned long stime;
+  unsigned long retime;
 };

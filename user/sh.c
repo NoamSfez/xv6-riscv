@@ -183,7 +183,7 @@ int main(void)
       runcmd(parsecmd(buf));
     char err_msg[32];
     wait(0, err_msg);
-    printf("%s\n", err_msg);
+    printf("%s", err_msg);
   }
   exit(0, "EXIT_SUCCESS");
 }
@@ -199,7 +199,7 @@ int fork1(void)
   int pid;
 
   pid = fork();
-  printf("forked: %d\n", pid);
+  // printf("forked: %d\n", pid);
   if (pid == -1)
     panic("fork");
   return pid;

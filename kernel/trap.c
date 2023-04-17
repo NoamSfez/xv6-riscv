@@ -156,8 +156,7 @@ void kerneltrap()
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2 && myProc != 0 && myProc->state == RUNNING)
   {
-    printf("pid running: %d\n", myProc->pid);
-    // panic("something");
+    // printf("pid running: %d\n", myProc->pid);
     myProc->accumulator += myProc->ps_priority;
     yield();
   }
@@ -172,8 +171,22 @@ void clockintr()
 {
   acquire(&tickslock);
   ticks++;
+
+  tiktok();
   wakeup(&ticks);
+  tiktok();
+
   release(&tickslock);
+
+  // printf("dkgjj,cvx j");
+
+  // struct proc *myProc = myproc();
+  // if (myProc)
+  // {
+  //   acquire(&myProc->lock);
+  //   printf("pid: %d - rtime: %d - stime: %d - retime: %d\n", myProc->pid, myProc->rtime, myProc->stime, myProc->retime);
+  //   release(&myProc->lock);
+  // }
 }
 
 // check if it's an external interrupt or software interrupt,

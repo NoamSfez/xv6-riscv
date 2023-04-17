@@ -120,3 +120,39 @@ sys_set_ps_priority(void)
 
   return set_ps_priority(priority);
 }
+
+uint64
+sys_set_cfs_priority(void)
+{
+  int priority;
+  argint(0, &priority);
+
+  return set_cfs_priority(priority);
+}
+
+uint64
+sys_get_cfs_stats(void)
+{
+  int pid;
+  uint64 priority;
+  uint64 rtime;
+  uint64 stime;
+  uint64 retime;
+
+  argint(0, &pid);
+  argaddr(1, &priority);
+  argaddr(2, &rtime);
+  argaddr(3, &stime);
+  argaddr(4, &retime);
+
+  return get_cfs_stats(pid, priority, rtime, stime, retime);
+}
+
+uint64
+sys_set_policy(void)
+{
+  int policy;
+  argint(0, &policy);
+
+  return set_policy(policy);
+}
